@@ -1218,6 +1218,13 @@ enum class ReliableKind : uint8_t {
     // coop::props::container_act_wire's commit. Never relayed; not pre-world; the same lane as the request, so an act's
     // end cannot overtake its start.
     ContainerActCommit = 209,
+
+    // ANY PEER: a player picked a TV's channel (op 0) or opened a link on it (op 1), from the TV's menu or a mod's
+    // panel on it (coop/interactables/tv_sync). Presser-authored and symmetric: the host relays a client's to the
+    // other clients, and each receiver runs the TV's own verb on its copy. Rides the Default lane behind PropSpawn;
+    // not pre-world. Late join: the host sends each TV's last channel, then each last link in the order they were
+    // opened, at the joiner's world-ready. TvStatePayload.
+    TvState = 210,
 };
 
 #pragma pack(push, 1)
@@ -1370,6 +1377,21 @@ struct CordLinkPayload {
     WireKey  child;
 };
 static_assert(sizeof(CordLinkPayload) == 104, "CordLinkPayload must be 104 bytes");
+
+// op 0 a channel (`channel`; the link fields empty), 1 a link (struct_tv: `name`, `link`, isUrl; `channel` 0).
+// `tv` is the TV's prop Key. Strings are UTF-8, not NUL-terminated; a link longer than `link` is never sent.
+struct TvStatePayload {
+    uint8_t  op;
+    uint8_t  isUrl;
+    uint8_t  pausePlayer;
+    uint8_t  linkLen;
+    int32_t  channel;
+    WireKey  tv;
+    uint8_t  nameLen;
+    char     name[27];
+    char     link[160];
+};
+static_assert(sizeof(TvStatePayload) == 228, "TvStatePayload must be 228 bytes");
 
 // A Blueprint class leaf name ("Aprop_equipment_flashlight_C"). Bytes beyond len are zero.
 struct WireClassName {

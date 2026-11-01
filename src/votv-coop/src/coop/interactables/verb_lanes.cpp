@@ -14,7 +14,9 @@
 #include "coop/interactables/keypad_verbs.h"
 #include "coop/interactables/lightgroup_verbs.h"
 #include "coop/interactables/toggle_verbs.h"
+#include "coop/interactables/tv_sync.h"
 #include "coop/items/point_sack_intent.h"
+#include "coop/mod_compat/mod_compat.h"
 #include "coop/net/session.h"
 
 #include "ue_wrap/core/walk_timer.h"  // per-lane [WALK-TIME] attribution (diagnostic)
@@ -35,6 +37,8 @@ void Install(coop::net::Session& session) {
     coop::cord_sync::Install(&session);          // a cord's link is the host's: a client claims its own player's plug, the host answers
     coop::coffee_intent::Install(&session);      // a client's press of the coffee vending machine or the coffee maker is run by the host
     coop::coffee_state::Install(&session);       // the coffee maker's state is the host's: it publishes the maker's record, a client's fill is cancelled
+    coop::tv_sync::Install(&session);            // a TV's channel and link go at its menu's verbs: each peer sends its own
+    coop::mod_compat::Install(session);          // another mod's own controls on what the lanes carry (a SmartTV URL bar)
 }
 
 void Tick(coop::net::Session& session) {
@@ -51,10 +55,13 @@ void Tick(coop::net::Session& session) {
     { ue_wrap::ScopedWalkTimer _w{"sync:cord"}; coop::cord_sync::Tick(); }  // settle its watches; HOST: the seed a joiner is owed; CLIENT: retry the parked links
     { ue_wrap::ScopedWalkTimer _w{"sync:coffee"}; coop::coffee_intent::Tick(session); }  // settle its gates; HOST: run one queued coffee press a tick a client
     coop::coffee_state::Tick();         // settle the maker's brew and fill gates
+    coop::tv_sync::Tick();              // settle the TV menu watches; retry a state whose TV has not streamed in
+    coop::mod_compat::Tick();           // name a supported mod once it loads
 }
 
 void ConnectReplayForSlot(int slot) {
     coop::cord_sync::QueueConnectBroadcastForSlot(slot);  // HOST: every corded prop's link to the joiner, then the seed's end
+    coop::tv_sync::ConnectReplayForSlot(slot);            // HOST: each TV's last channel and link
 }
 
 void OnDisconnect() {
@@ -71,6 +78,8 @@ void OnDisconnect() {
     coop::cord_sync::OnDisconnect();
     coop::coffee_intent::OnDisconnect();   // a coffee device's own press runs where it is made
     coop::coffee_state::OnDisconnect();    // the maker's own fill runs where it is made
+    coop::tv_sync::OnDisconnect();
+    coop::mod_compat::OnDisconnect();
 }
 
 }  // namespace coop::verb_lanes

@@ -29,6 +29,7 @@
 #include "coop/props/container_contents_sync.h"  // the container stack slice lane
 #include "coop/props/trash_pile_sync.h"
 #include "coop/interactables/turbine_sync.h"
+#include "coop/interactables/tv_sync.h"
 #include "coop/interactables/window_stroke_sync.h"
 #include "coop/interactables/window_sync.h"
 
@@ -606,6 +607,25 @@ bool HandleStateEvent(net::Session& session,
             break;
         }
         coop::cord_sync::OnReliable(p, static_cast<uint8_t>(msg.senderPeerSlot));
+        break;
+    }
+    case net::ReliableKind::TvState: {
+        // A TV's channel or link, from any peer (the host relays a client's). The format is judged here;
+        // coop::tv_sync::OnReliable resolves the TV and runs its verb.
+        net::TvStatePayload p{};
+        if (msg.payloadLen != sizeof(p)) {
+            UE_LOGW("event_feed: TvState of %zu bytes -- dropping", static_cast<size_t>(msg.payloadLen));
+            break;
+        }
+        std::memcpy(&p, msg.payload, sizeof(p));
+        const bool fields = p.op <= 1 && p.tv.len > 0 && p.tv.len <= sizeof(p.tv.data) &&
+                            p.nameLen <= sizeof(p.name) && p.linkLen <= sizeof(p.link) &&
+                            (p.op == 0 ? p.linkLen == 0 && p.channel >= -1 : p.linkLen > 0 && p.channel == 0);
+        if (!fields) {
+            UE_LOGW("event_feed: TvState with malformed fields (op %u) -- dropping", static_cast<unsigned>(p.op));
+            break;
+        }
+        coop::tv_sync::OnReliable(p, static_cast<uint8_t>(msg.senderPeerSlot));
         break;
     }
     case net::ReliableKind::ServerSetting:

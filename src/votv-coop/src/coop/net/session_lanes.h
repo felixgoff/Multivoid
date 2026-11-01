@@ -169,6 +169,7 @@ constexpr bool IsClientRelayableReliableKind(ReliableKind k) {
     case ReliableKind::ReelSlot:          // presser-authored
     case ReliableKind::MeadowAppend:      // presser-symmetric
     case ReliableKind::MeadowDelete:      // player-symmetric
+    case ReliableKind::TvState:           // presser-authored
         return true;
     default:
         return false;

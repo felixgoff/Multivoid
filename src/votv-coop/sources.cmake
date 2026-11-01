@@ -270,6 +270,8 @@ set(VOTVCOOP_SOURCES
     src/coop/config/config_session.cpp
     src/coop/config/config_selftest.cpp
     src/coop/config/config_review.cpp
+    src/coop/mod_compat/mod_compat.cpp
+    src/coop/mod_compat/smarttv.cpp
     src/coop/mod_data/legacy_note.cpp
     src/coop/atomic_file/atomic_file.cpp
     src/coop/atomic_file/atomic_file_selftest.cpp
@@ -379,6 +381,7 @@ set(VOTVCOOP_SOURCES
     src/coop/interactables/desk_verb_intent.cpp
     src/coop/interactables/desk_verb_effects.cpp
     src/coop/interactables/toggle_verbs.cpp
+    src/coop/interactables/tv_sync.cpp
     src/coop/interactables/drive_rack_sync.cpp
     src/coop/interactables/desk_snd_fx.cpp
     src/coop/interactables/desk_ping_sync.cpp

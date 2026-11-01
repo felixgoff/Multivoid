@@ -405,6 +405,23 @@ a refused install is refunded by an upgrade the host spawns at the box, a refuse
 removed from its author's hand -- and a joiner gets every box's count at its world-ready
 (`coop/interactables/server_upgrade_sync`).
 
+### TVs
+
+A TV (`prop_tv2_C` and its subclasses) shows one of the gamemode's shared media channels, `channel`.
+A link (a `struct_tv`: a name, a link, `isUrl`) opens on that channel's player. Two verbs of the
+TV's menu (`ui_tvInterface_C`) change what a TV shows: `setChannel`, which frees the old channel and
+calls the TV's `useChannel`, and `select`, which calls its `openLink` `[RD]`. A mod's control can call
+`openLink` too (SmartTV's library rows do `[V]`), so the lane watches `openLink` itself, on any class,
+before its body (a mod may skip the body). The peer whose player pressed sends `TvState`: for a
+channel, the TV's `channel` after the menu's `setChannel`; for a link, the `struct_tv` passed to
+`openLink`. A TV's call from its own graph (its playlist's next item, its BeginPlay) is not sent,
+since it runs on every peer's copy alike. The host relays a client's message, and each receiver runs
+the same TV verbs on its copy (`ue_wrap/devices/tv`); the watches pass over a call of ours, so nothing
+echoes. A press is symmetric and the last one
+stands. A received state whose TV has not streamed in yet is retried for ten seconds. Each peer opens
+the link itself, so playback position is not synced. Another mod's control on a TV sends through the
+same lane ([mod-compat.md](mod-compat.md)). `[?]` not yet run in a two-peer game.
+
 ## Who owns what
 
 | State | Owner | Shape |
@@ -418,6 +435,7 @@ removed from its author's hand -- and a joiner gets every box's count at its wor
 | the turbine | the host | six floats a second |
 | a window, the grime | any peer, minimum wins | monotone decreases |
 | the drone | the host | a transform stream; the client's tick suppressed |
+| a TV's channel and link | the presser, last press stands | its menu's verbs sent after the body; the TV's own verbs run on each receiver |
 
 ## Wire messages
 
@@ -436,6 +454,7 @@ removed from its author's hand -- and a joiner gets every box's count at its wor
 | `TurbineState`, `WindowCleanState`, `GrimeState` | each peer or the host | the driver floats; a decrease |
 | `DroneState` | the host to all | the drone's transform and flags, among them its leave timer |
 | `DroneFlyIntent` | a client to the host | the face pressed, the keyboard or the leave timer; the host finds the console by the sender's reach |
+| `TvState` | each peer, relayed | a TV's Key and its channel, or the link opened on it (name, link, isUrl, pausePlayer) |
 
 ## Late join
 
@@ -448,6 +467,10 @@ drone's pose are sent the same way.
 The coordinate towers go to a joiner at the same edge, every tower's row. Its own world's load
 would have scrambled again any tower that was saved broken; that roll is refused, so the row is the
 state it shows, and the first rows a world takes play no sound.
+
+The host keeps each TV's last channel and last link of the session. At the joiner's ready edge it sends
+every channel, then every link, oldest first, since TVs on one channel share its player and the newest
+link must open last.
 
 ## Known limits
 
@@ -468,5 +491,6 @@ state it shows, and the first rows a world takes play no sound.
 | the fuse towers | `coop/world/fuse_tower_rows`, `coop/world/fuse_tower_ops`, `coop/world/fuse_tower_kind`, `ue_wrap/devices/coord_tower`, `ue_wrap/devices/radio_tower` |
 | the drone | `coop/interactables/drone_sync`, `coop/interactables/drone_call_intent`, `ue_wrap/devices/drone`, `ue_wrap/devices/drone_console` |
 | the signal servers | `coop/interactables/serverbox_sync`, `coop/interactables/server_upgrade_sync`, `ue_wrap/devices/serverbox` |
+| TVs | `coop/interactables/tv_sync`, `ue_wrap/devices/tv`, `coop/mod_compat/smarttv` |
 | identity | `coop/element/portable_identity` |
 | tests and probes | `coop/dev/container_selftest`, `coop/dev/door_drill`, `coop/dev/lightswitch_probe`, `coop/dev/drone_probe`, `coop/dev/drone_call_drill`, `coop/dev/light_group_census`, `coop/dev/tower_drill` |
