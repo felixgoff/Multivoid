@@ -105,13 +105,16 @@ int32_t InstanceOffset::Of(void* obj) {
     void* const cls = obj ? ClassOf(obj) : nullptr;
     if (!cls) return -1;
     if (cls != cls_ || !IsLiveByIndex(cls_, clsIdx_) || SlotSerial(clsIdx_) != clsSerial_) {
+        const bool first = !cls_;
         cls_ = cls;
         clsIdx_ = InternalIndexOf(cls);
         clsSerial_ = AllocateSlotSerial(clsIdx_);
+        const int32_t was = off_;
         off_ = FindPropertyOffset(cls, prop_);
-        if (off_ < 0)
+        // Said only on a change: sibling classes that share the field swap this one slot back and forth.
+        if (off_ < 0 && (first || was >= 0))
             UE_LOGW("reflection: the loaded %ls declares no '%ls'", ClassNameOf(obj).c_str(), prop_);
-        else
+        else if (off_ >= 0 && off_ != was)
             UE_LOGI("reflection: %ls.%ls @0x%04X", ClassNameOf(obj).c_str(), prop_, off_);
     }
     return off_;

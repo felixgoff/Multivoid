@@ -29,11 +29,24 @@ bool ReadChannel(void* tv, int32_t& out);
 // The struct_tv parameter `data` of `function` (openLink) from its frame.
 bool ReadLinkParam(void* function, const uint8_t* locals, Link& out);
 
-// What the menu's setChannel does to its TV: free the channel it shows (the gamemode's
-// removeMediaChannel), then bind the new one (useChannel). False when a call did not resolve.
+// Bind the TV to `channel` (0 or more) through its own useChannel. The old channel is not freed: the
+// gamemode's channels are shared by every TV on them, and a mod that keeps its own per-channel players
+// (SmartTV) skips the menu's free on purpose. False for a negative channel or a call that did not resolve.
 bool SetChannel(void* tv, int32_t channel);
 
 // The TV's own openLink(data, pausePlayer). False when the call did not resolve.
 bool OpenLink(void* tv, const Link& link, bool pausePlayer);
+
+// True when `obj` is a TV's menu (ui_tvInterface_C): the caller of the playback calls a player makes.
+bool IsMenu(void* obj);
+
+// What the menu's play bar does to the TV's media player (its `mediaPlayer`, the channel's): Pause, Play, Seek to
+// `ms` milliseconds; and its skip button, the TV's own fin (the next item). False when the call did not resolve.
+enum class Playback : uint8_t { Pause, Play, Seek, Skip };
+bool RunPlayback(void* tv, Playback what, int32_t ms);
+
+// The length of what the TV's player holds, in milliseconds (its GetDuration, which a mod like SmartTV answers for
+// its own player). False when the call did not resolve or the length is not known.
+bool DurationMs(void* tv, int64_t& ms);
 
 }  // namespace ue_wrap::tv

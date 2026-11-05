@@ -7,7 +7,9 @@
 // that its watches pass over, so nothing echoes. A mod control that reaches no TV verb sends through SendLink
 // (coop/mod_compat). Symmetric: the last pick
 // stands. The host keeps each TV's last channel and last link and sends them to a joiner at its world-ready.
-// Playback position is not synced: each peer opens the link itself.
+// The menu's play bar goes the same way: its pause, play and seek (the channel player's own natives, which a mod
+// like SmartTV hooks) and its skip (the TV's fin), each sent for the menu's TV and run on each receiver's player.
+// Playback position is not otherwise synced: each peer opens the link itself.
 
 #pragma once
 

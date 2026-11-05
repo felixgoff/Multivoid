@@ -410,17 +410,19 @@ removed from its author's hand -- and a joiner gets every box's count at its wor
 A TV (`prop_tv2_C` and its subclasses) shows one of the gamemode's shared media channels, `channel`.
 A link (a `struct_tv`: a name, a link, `isUrl`) opens on that channel's player. Two verbs of the
 TV's menu (`ui_tvInterface_C`) change what a TV shows: `setChannel`, which frees the old channel and
-calls the TV's `useChannel`, and `select`, which calls its `openLink` `[RD]`. A mod's control can call
+calls the TV's `useChannel` (SmartTV skips that body and tunes the TV itself), and `select`, which calls its `openLink` `[RD]`. A mod's control can call
 `openLink` too (SmartTV's library rows do `[V]`), so the lane watches `openLink` itself, on any class,
 before its body (a mod may skip the body). The peer whose player pressed sends `TvState`: for a
 channel, the TV's `channel` after the menu's `setChannel`; for a link, the `struct_tv` passed to
 `openLink`. A TV's call from its own graph (its playlist's next item, its BeginPlay) is not sent,
 since it runs on every peer's copy alike. The host relays a client's message, and each receiver runs
 the same TV verbs on its copy (`ue_wrap/devices/tv`); the watches pass over a call of ours, so nothing
-echoes. A press is symmetric and the last one
-stands. A received state whose TV has not streamed in yet is retried for ten seconds. Each peer opens
+echoes. A channel is applied through the TV's `useChannel` alone and never frees the old channel: freeing
+one SmartTV still plays on its other TVs crashed it `[V]`. A negative channel (the TV between channels,
+which SmartTV passes through as it retunes) is neither sent nor applied. A press is symmetric and the last
+one stands. A received state whose TV has not streamed in yet is retried for ten seconds. Each peer opens
 the link itself, so playback position is not synced. Another mod's control on a TV sends through the
-same lane ([mod-compat.md](mod-compat.md)). `[?]` not yet run in a two-peer game.
+same lane ([mod-compat.md](mod-compat.md)). `[V]` channels and links crossed between two peers on one machine.
 
 ## Who owns what
 

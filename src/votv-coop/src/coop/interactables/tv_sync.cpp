@@ -10,8 +10,10 @@
 
 #include "ue_wrap/actors/prop.h"
 #include "ue_wrap/core/log.h"
+#include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/reflection_props.h"
 #include "ue_wrap/core/script_gate.h"
+#include "ue_wrap/core/ufunction_hook.h"
 #include "ue_wrap/facts/function_row.h"
 
 #include <algorithm>
@@ -33,15 +35,26 @@ UE_FACT_FN(kRowSetChannel, "tv_sync", L"ui_tvInterface_C", L"setChannel", Declar
 // Every route that opens a link on a TV ends in its openLink: the menu's select, and a mod's own control (SmartTV's
 // library and Jellyfin rows). Any class, since a TV subclass may declare its own.
 UE_FACT_FN(kRowOpenLink, "tv_sync", nullptr, L"openLink", AnyClass);
+// The menu's play bar: the channel player's own Pause and Play (natives a mod like SmartTV hooks to drive its own
+// player), its seek (the menu's setPB, the slider's fraction of the length, which calls the player's Seek), and its
+// skip button, the TV's fin.
+UE_FACT_FN(kRowPause, "tv_sync", L"MediaPlayer", L"Pause", Declared);
+UE_FACT_FN(kRowPlay, "tv_sync", L"MediaPlayer", L"Play", Declared);
+UE_FACT_FN(kRowSetPB, "tv_sync", L"ui_tvInterface_C", L"setPB", Declared);
+UE_FACT_FN(kRowFin, "tv_sync", L"prop_tv2_C", L"fin", Declared);
 
 constexpr int kTagChannel = 0x54564348;  // 'TVCH'
 constexpr int kTagOpenLink = 0x54564F4C; // 'TVOL'
+constexpr int kTagFin = 0x5456464E;      // 'TVFN'
+constexpr int kTagSetPB = 0x54565350;    // 'TVSP'
 // A received state whose TV has not streamed in is retried this long.
 constexpr auto kParkFor = std::chrono::seconds(10);
 
 std::atomic<coop::net::Session*> g_session{nullptr};
 bool g_channelWatched = false;
 bool g_openLinkWatched = false;
+bool g_finWatched = false, g_setPBWatched = false;
+bool g_pauseHooked = false, g_playHooked = false;
 bool g_settled = false;
 
 // HOST: each TV's last state this session, the seed a joiner is sent.
@@ -74,6 +87,7 @@ coop::net::Session* Live() {
 }
 
 void Remember(const coop::net::TvStatePayload& p) {
+    if (p.op > 1) return;  // a press on the play bar is an act, not a state a joiner is owed
     Last& l = g_last[coop::net::StringFromWireKey(p.tv)];
     if (p.op == 0) {
         l.channel = p.channel;
@@ -93,8 +107,12 @@ void Send(coop::net::Session* s, const coop::net::TvStatePayload& p) {
         s->SendReliableToSlot(0, coop::net::ReliableKind::TvState, &p, sizeof(p));
     }
     ++g_sent;
+    static const char* const kPlayback[] = {"pause", "play", "seek", "skip"};
     if (p.op == 0)
         UE_LOGI("[TV] sent '%ls' channel %d", coop::net::StringFromWireKey(p.tv).c_str(), p.channel);
+    else if (p.op >= 2)
+        UE_LOGI("[TV] sent '%ls' %s%s", coop::net::StringFromWireKey(p.tv).c_str(), kPlayback[p.op - 2],
+                p.op == 4 ? (" to " + std::to_string(p.channel) + " ms").c_str() : "");
     else
         UE_LOGI("[TV] sent '%ls' link (%u bytes, isUrl=%u)", coop::net::StringFromWireKey(p.tv).c_str(),
                 static_cast<unsigned>(p.linkLen), static_cast<unsigned>(p.isUrl));
@@ -124,7 +142,8 @@ void OnSetChannelPost(const sg::Call& c) {
     auto* s = Live();
     coop::net::TvStatePayload p{};
     void* tv = s ? T::TvOfInterface(c.object) : nullptr;
-    if (!Begin(s, tv, p) || !T::ReadChannel(tv, p.channel)) return;
+    // A negative channel is the TV between channels (SmartTV passes through -1 as it retunes), not one to show.
+    if (!Begin(s, tv, p) || !T::ReadChannel(tv, p.channel) || p.channel < 0) return;
     Send(s, p);
 }
 
@@ -141,11 +160,75 @@ sg::Verdict OnOpenLinkPre(const sg::Call& c) {
     return sg::Verdict::Run;
 }
 
+// A press on the TV menu's play bar: sent for the menu's TV. `ms` is the seek's target, else 0.
+void SendPlayback(void* menu, T::Playback what, int32_t ms) {
+    auto* s = Live();
+    coop::net::TvStatePayload p{};
+    void* tv = s ? T::TvOfInterface(menu) : nullptr;
+    if (!Begin(s, tv, p)) return;
+    p.op = static_cast<uint8_t>(2 + static_cast<int>(what));
+    p.channel = ms;
+    Send(s, p);
+}
+
+// The player's natives, after the original: a call the menu's own graph makes (the play bar), never ours.
+void OnPausePost(void* /*player*/, void* source, void* /*result*/) {
+    if (!ue_wrap::reflection::InCoopDispatch() && T::IsMenu(source)) SendPlayback(source, T::Playback::Pause, 0);
+}
+void OnPlayPost(void* /*player*/, void* source, void* /*result*/) {
+    if (!ue_wrap::reflection::InCoopDispatch() && T::IsMenu(source)) SendPlayback(source, T::Playback::Play, 0);
+}
+
+// The menu's seek: setPB(Scalar), the slider's fraction of the length. Sent as milliseconds, the sender's own
+// player's length times the fraction, which every peer's copy of the item shares.
+sg::Verdict OnSetPBPre(const sg::Call& c) {
+    static ue_wrap::reflection::ParamOffset scalar{L"Scalar"};
+    const int32_t off = scalar.Of(c.function);
+    void* tv = T::TvOfInterface(c.object);
+    int64_t len = 0;
+    if (c.fromOurCode || off < 0 || !tv || !T::DurationMs(tv, len)) return sg::Verdict::Run;
+    float f = 0;
+    std::memcpy(&f, c.locals + off, sizeof(f));
+    const int64_t ms = static_cast<int64_t>(static_cast<double>(len) * f);
+    if (ms >= 0 && ms <= INT32_MAX) SendPlayback(c.object, T::Playback::Seek, static_cast<int32_t>(ms));
+    return sg::Verdict::Run;
+}
+
+// The skip button: the menu calls its TV's fin. A TV's own fin (its playlist's end) runs on every peer alike.
+sg::Verdict OnFinPre(const sg::Call& c) {
+    if (!c.fromOurCode && T::IsMenu(c.callerObject) && T::IsTv(c.object))
+        SendPlayback(c.callerObject, T::Playback::Skip, 0);
+    return sg::Verdict::Run;
+}
+
+bool HookNative(const ue_wrap::facts::Function& row, ue_wrap::ufunction_hook::PostNativeCallback cb, bool& done) {
+    if (done) return true;
+    const ue_wrap::facts::Resolved fn = ue_wrap::facts::Resolve(row);
+    if (!fn) return false;  // the class is not loaded yet: asked again next tick
+    // One try once the class resolves: a refusal is final, said once, never retried every tick.
+    done = true;
+    if (!ue_wrap::ufunction_hook::InstallPostHook(fn, cb, /*armed=*/true)) UE_LOGE("[TV] the hook on MediaPlayer.%ls did not install; that play-bar press stays on its peer",
+                       row.Name());
+    return done;
+}
+
 // Runs the state on this peer's copy; false only while its TV has not streamed in (a verb that fails is counted).
 bool Apply(const coop::net::TvStatePayload& p) {
     void* tv = coop::prop_key_index::Find(coop::net::StringFromWireKey(p.tv));
     if (!tv || !T::IsTv(tv)) return false;
     bool ok;
+    if (p.op >= 2) {
+        ok = T::RunPlayback(tv, static_cast<T::Playback>(p.op - 2), p.channel);
+        if (ok) {
+            ++g_applied;
+            UE_LOGI("[TV] applied '%ls' play-bar press %u", coop::net::StringFromWireKey(p.tv).c_str(),
+                    static_cast<unsigned>(p.op));
+        } else if (++g_failed == 1) {
+            UE_LOGW("[TV] a play-bar press did not resolve on '%ls' (said once)",
+                    coop::net::StringFromWireKey(p.tv).c_str());
+        }
+        return true;
+    }
     if (p.op == 0) {
         int32_t now = -1;
         ok = (T::ReadChannel(tv, now) && now == p.channel) || T::SetChannel(tv, p.channel);
@@ -172,6 +255,10 @@ void Install(coop::net::Session* session) {
     g_session.store(session, std::memory_order_release);
     if (!g_channelWatched) g_channelWatched = sg::WatchName(kRowSetChannel, kTagChannel, nullptr, &OnSetChannelPost);
     if (!g_openLinkWatched) g_openLinkWatched = sg::WatchName(kRowOpenLink, kTagOpenLink, &OnOpenLinkPre, nullptr);
+    if (!g_finWatched) g_finWatched = sg::WatchName(kRowFin, kTagFin, &OnFinPre, nullptr);
+    if (!g_setPBWatched) g_setPBWatched = sg::WatchName(kRowSetPB, kTagSetPB, &OnSetPBPre, nullptr);
+    HookNative(kRowPause, &OnPausePost, g_pauseHooked);
+    HookNative(kRowPlay, &OnPlayPost, g_playHooked);
 }
 
 void Tick() {

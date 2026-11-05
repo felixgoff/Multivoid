@@ -618,9 +618,11 @@ bool HandleStateEvent(net::Session& session,
             break;
         }
         std::memcpy(&p, msg.payload, sizeof(p));
-        const bool fields = p.op <= 1 && p.tv.len > 0 && p.tv.len <= sizeof(p.tv.data) &&
-                            p.nameLen <= sizeof(p.name) && p.linkLen <= sizeof(p.link) &&
-                            (p.op == 0 ? p.linkLen == 0 && p.channel >= -1 : p.linkLen > 0 && p.channel == 0);
+        const bool linkFields = p.op == 1 ? p.linkLen > 0 && p.channel == 0
+                                          : p.linkLen == 0 && p.nameLen == 0 &&
+                                                (p.op == 0 || p.op == 4 ? p.channel >= 0 : p.channel == 0);
+        const bool fields = p.op <= 5 && p.tv.len > 0 && p.tv.len <= sizeof(p.tv.data) &&
+                            p.nameLen <= sizeof(p.name) && p.linkLen <= sizeof(p.link) && linkFields;
         if (!fields) {
             UE_LOGW("event_feed: TvState with malformed fields (op %u) -- dropping", static_cast<unsigned>(p.op));
             break;

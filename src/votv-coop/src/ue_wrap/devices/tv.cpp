@@ -19,8 +19,8 @@ namespace R = reflection;
 
 ue_wrap::CachedObjRef g_tvClass;
 R::InstanceOffset g_channel{L"channel"};
-R::InstanceOffset g_gamemode{L"gamemode"};
 R::InstanceOffset g_radio{L"radio"};
+R::InstanceOffset g_mediaPlayer{L"mediaPlayer"};
 
 void* TvClass() {
     if (void* k = g_tvClass.Get()) return k;
@@ -100,18 +100,46 @@ bool ReadLinkParam(void* function, const uint8_t* locals, Link& out) {
 }
 
 bool SetChannel(void* tv, int32_t channel) {
-    int32_t old = -1;
-    void* use = FunctionOf(tv, L"useChannel");
-    if (!use || !ReadChannel(tv, old)) return false;
-    if (old >= 0) {
-        void* gm = ReadObject(tv, g_gamemode);
-        void* remove = FunctionOf(gm, L"removeMediaChannel");
-        if (!remove) return false;
-        ParamFrame f(remove);
-        if (!f.valid() || !f.Set(L"Index", old) || !Call(gm, f)) return false;
-    }
+    void* use = channel >= 0 && IsTv(tv) ? FunctionOf(tv, L"useChannel") : nullptr;
+    if (!use) return false;
     ParamFrame f(use);
     return f.valid() && f.Set(L"channel", channel) && Call(tv, f);
+}
+
+bool IsMenu(void* obj) {
+    return R::IsLive(obj) && R::NameEquals(R::NameOf(R::ClassOf(obj)), L"ui_tvInterface_C");
+}
+
+bool RunPlayback(void* tv, Playback what, int32_t ms) {
+    if (!IsTv(tv)) return false;
+    if (what == Playback::Skip) {
+        void* fin = FunctionOf(tv, L"fin");
+        ParamFrame f(fin);
+        return fin && f.valid() && Call(tv, f);
+    }
+    void* player = ReadObject(tv, g_mediaPlayer);
+    const wchar_t* name = what == Playback::Pause ? L"Pause" : what == Playback::Play ? L"Play" : L"Seek";
+    void* fn = FunctionOf(player, name);
+    if (!fn) return false;
+    ParamFrame f(fn);
+    if (!f.valid()) return false;
+    if (what == Playback::Seek) {
+        const int64_t ticks = static_cast<int64_t>(ms) * 10000;  // FTimespan counts 100 ns ticks
+        if (!f.Set(L"Time", ticks)) return false;
+    }
+    return Call(player, f);
+}
+
+bool DurationMs(void* tv, int64_t& ms) {
+    void* player = IsTv(tv) ? ReadObject(tv, g_mediaPlayer) : nullptr;
+    void* fn = FunctionOf(player, L"GetDuration");
+    if (!fn) return false;
+    ParamFrame f(fn);
+    if (!f.valid() || !Call(player, f)) return false;
+    const int64_t ticks = f.Get<int64_t>(L"ReturnValue");  // FTimespan counts 100 ns ticks
+    if (ticks <= 0) return false;
+    ms = ticks / 10000;
+    return true;
 }
 
 bool OpenLink(void* tv, const Link& link, bool pausePlayer) {

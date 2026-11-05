@@ -1378,7 +1378,9 @@ struct CordLinkPayload {
 };
 static_assert(sizeof(CordLinkPayload) == 104, "CordLinkPayload must be 104 bytes");
 
-// op 0 a channel (`channel`; the link fields empty), 1 a link (struct_tv: `name`, `link`, isUrl; `channel` 0).
+// op 0 a channel (`channel`; the link fields empty), 1 a link (struct_tv: `name`, `link`, isUrl; `channel` 0),
+// 2 pause, 3 play, 4 seek (`channel` holds the target in milliseconds), 5 skip: a press on the TV menu's play bar,
+// the link fields empty.
 // `tv` is the TV's prop Key. Strings are UTF-8, not NUL-terminated; a link longer than `link` is never sent.
 struct TvStatePayload {
     uint8_t  op;
